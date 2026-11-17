@@ -116,7 +116,12 @@ def main(args):
                 output_vid_name = os.path.join(temp_dir, args.output_vid_name)
             output_vid_name_concat = os.path.join(temp_dir, output_basename + "_concat.mp4")
             
-            # Extract frames from source video
+            # Extract frames from source video.
+            # save_dir_full exists only for a real video. A single image has no
+            # extracted-frame directory; removing it unconditionally raised
+            # NameError after the MP4 was written and the broad except below
+            # swallowed that error.
+            save_dir_full = None
             if get_file_type(video_path) == "video":
                 save_dir_full = os.path.join(temp_dir, input_basename)
                 os.makedirs(save_dir_full, exist_ok=True)
@@ -239,8 +244,9 @@ def main(args):
             # Clean up temporary files
             shutil.rmtree(result_img_save_path)
             os.remove(temp_vid_path)
-            
-            shutil.rmtree(save_dir_full)
+
+            if save_dir_full is not None:
+                shutil.rmtree(save_dir_full)
             if not args.saved_coord:
                 os.remove(crop_coord_save_path)
                     
