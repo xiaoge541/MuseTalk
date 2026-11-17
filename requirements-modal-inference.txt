@@ -1,4 +1,6 @@
-# Inference image pins for MuseTalk 1.5.
+# Cloud inference image pins for MuseTalk 1.5. Not the local submitter.
+# Local CPU tests and the local CLI use requirements-local-client.txt
+# (modal==1.6.4 only). Do not install this file to re-run those tests.
 # Not installed in the code-prep environment. Image build is untested.
 # torch==2.0.1 / torchvision==0.15.2 / torchaudio==2.0.2 come from
 # https://download.pytorch.org/whl/cu118 in modal_app.py, before this file.

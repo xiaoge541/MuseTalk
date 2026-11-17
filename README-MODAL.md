@@ -1,8 +1,59 @@
 # MuseTalk 1.5 Modal Starter 单任务
 
-这次只准备代码。没有 Modal 登录、镜像构建、部署、GPU、推理、权重下载，也没有生成 MP4。用量和耗时里的实测格全部是空的。
+这次只准备代码。没有 Modal 登录、镜像构建、部署、GPU、推理、权重下载，也没有生成 MP4。用量和耗时里的实测格全部是空的。账号认证和 attestation 都还没有就绪。下文的 `submit`、`recover`、`modal app stop` 只在那些条件以后满足时执行，这次没有执行。
 
 女性人物加男性音色只作为技术核对。这段测试片不是完整 EL01，也不是合格作品。
+
+## 这份 ZIP 不是完整仓库
+
+`/opt/cursor/artifacts/musetalk15-modal-starter-code.zip` 是适配层 overlay，不是一份能单独跑起来的 MuseTalk 源码树。压缩包里有 `modal_musetalk/`、`modal_app.py`、`README-MODAL.md`、两份 requirements、`tests/test_modal_adapter.py`，以及改过清理逻辑的 `scripts/inference.py`。里面没有 `musetalk/`、`configs/`、`app.py`、权重或媒体。只解开 ZIP、不检出本 fork 分支，不能跑推理，也不能把 ZIP 当成上游仓库。
+
+CPU 测试和以后的提交都从本分支的 git 检出目录开始。ZIP 只用于把适配层拷回已有检出，或对照文件。
+
+## 本地安装与复跑 CPU 测试
+
+本次 20 项 CPU 测试使用的解释器是 CPython 3.12.3。Modal SDK 1.6.4 声明支持 Python 3.10–3.15。3.10、3.11 和 3.13 没有在这里复跑。云镜像写的是 Python 3.10，与本地 venv 不是同一个环境，而且镜像没有构建。
+
+系统需要 `ffmpeg` 和 `ffprobe`。本次测试看到的是 ffmpeg 6.1.1。别的版本没有复跑。Debian/Ubuntu 上这两个命令来自同一个 `ffmpeg` 包。
+
+本地提交器的第三方依赖只有 `modal==1.6.4`，写在 `requirements-local-client.txt`。代码没有 `import yaml`。`huggingface_hub` 和 `gdown` 只在远程的 `prepare_weights()` 里导入，本地 CLI 不导入它们。20 项 CPU 测试只用标准库；不安装 Modal 也能复跑。安装 `modal==1.6.4` 是为了以后门闩打开时能够 `import modal`，这次没有做认证。
+
+不要为了复跑测试去安装 `requirements.txt` 或 `requirements-modal-inference.txt`。前者是上游训练/完整环境清单，含 tensorflow。后者是尚未构建的 GPU 镜像用的推理包，含 torch 生态，不是本地提交器。
+
+从空目录检出此 fork 分支：
+
+```bash
+git clone https://github.com/xiaoge541/MuseTalk.git
+cd MuseTalk
+git fetch origin cursor/musetalk15-modal-starter-78f8
+git switch cursor/musetalk15-modal-starter-78f8
+git rev-parse HEAD
+```
+
+`git rev-parse HEAD` 应等于本 README 所在提交。然后在这个检出目录里：
+
+```bash
+ffmpeg -version
+ffprobe -version
+# 若上面两个命令不存在（Debian/Ubuntu）：
+# sudo apt-get update && sudo apt-get install -y ffmpeg
+
+python3.12 -m venv .venv
+. .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -r requirements-local-client.txt
+python -m unittest tests.test_modal_adapter -v
+```
+
+`python -m unittest` 期望 20 项通过。它不下载权重，不调用 Modal API。
+
+云镜像（未构建）和 `requirements-modal-inference.txt` 的差别：
+
+1. 基础是 `debian_slim`、Python 3.10，再 `apt` 安装 `ffmpeg`、`git`、`libgl1`、`libglib2.0-0`、`wget`、`ca-certificates`。
+2. 先从 `https://download.pytorch.org/whl/cu118` 安装 `torch==2.0.1`、`torchvision==0.15.2`、`torchaudio==2.0.2`。这三行不在 requirements 文件里。
+3. 然后才 `pip install -r requirements-modal-inference.txt`（diffusers、transformers、face-alignment==1.3.4、modal==1.6.4 等）。
+4. 再执行镜像里的 `run_commands`：`openmim==0.3.9`、`mmcv==2.0.1`、`mmdet==3.1.0`、`mmpose==1.1.0`、`mmengine==0.10.5`。这五项也不在那个 requirements 文件里，因为 mmcv 要在 CUDA 版 torch 之后装。
+5. 最后把 git 检出目录挂进容器，不是把 ZIP 当成仓库。
 
 ## 入口结论
 
@@ -12,7 +63,9 @@
 
 `app.py` 的 Gradio `inference()` 不是这条路径。非视频输入被当成图片目录做 `glob`，单张 PNG 不会按单图推理。本适配不调用 `app.py`。
 
-`input_still_container_NOT_DYNAMIC.mp4` 会被 `get_file_type` 判成 `video`，然后抽出全部帧。它是同一张静图的 25 fps、85 帧、3.4 秒、H264/yuv420p、无声容器，不是动态底片。提交时不要把它当作 `video_path`。
+`input_still_container_NOT_DYNAMIC.mp4` 是同一张静图的 25 fps、85 帧、3.4 秒、H264/yuv420p、无声容器，不是动态底片。上游并没有拒绝这种文件。`musetalk/utils/utils.py` 里 `.mp4` 属于 `get_file_type` 的 video 列表；`scripts/inference.py` 的 video 分支会用 ffmpeg 抽出全部帧，再用 `get_video_fps` 取帧率。把它写进上游 yaml 的 `video_path` 会走这条视频路径。
+
+本适配器的 `--portrait` 只收 `.png`。`validate_portrait_png` 看到非 PNG 就拒绝。远程任务也把字节写成 `portrait.png`，yaml 的 `video_path` 指向这张图，从而走 image 分支。这是适配器的选择，不是上游不支持静图视频。
 
 单图清理原先无条件 `shutil.rmtree(save_dir_full)`。这个变量只在视频分支里赋值，异常又被函数里的 `except` 吃掉。fork 上的 `scripts/inference.py` 改成仅在该目录存在时删除。这个改动没有在 GPU 上跑过。
 
@@ -47,7 +100,7 @@ ffmpeg -y -i AUDIO.wav -ar 16000 -ac 1 -c:a pcm_s16le AUDIO_16k_mono.wav
 ffmpeg -y -loop 1 -i PORTRAIT.png -t 3.4 -r 25 -c:v libx264 -pix_fmt yuv420p -an STILL_CONTAINER_NOT_DYNAMIC.mp4
 ```
 
-提交程序会拒绝把 `.mp4` 当作肖像，也会拒绝把 16 kHz 单声道当作原始音频。
+适配器的提交命令会拒绝把 `.mp4` 放在 `--portrait` 上，也会拒绝把 16 kHz 单声道当作原始音频。直接调用上游 `scripts.inference` 时，`.mp4` 仍然可以写进 `video_path`。
 
 ## 花费门闩
 
@@ -57,7 +110,7 @@ ffmpeg -y -loop 1 -i PORTRAIT.png -t 3.4 -r 25 -c:v libx264 -pix_fmt yuv420p -an
 
 这些事实全部不能打开门闩。
 
-以后若要跑唯一一次任务，账号持有人把核对结果写成仓库外的 JSON，并设置：
+认证和 attestation 现在都没有。下面的环境变量和 `submit` 不是这次要执行的命令。以后若经授权的操作者核对过账单页，并且账号持有人决定允许登录和这一次费用，再把核对结果写成仓库外的 JSON：
 
 ```bash
 export MUSETALK_SPEND_ATTESTATION=/path/to/attestation.json
@@ -73,6 +126,8 @@ export MUSETALK_SPEND_ATTESTATION=/path/to/attestation.json
 
 SDK 1.6.4 里，应用异常在 `retries=0` 时不由我们重试。容器崩溃（例如 OOM、抢占）仍可能被 Modal 重新调度。那不是客户端的第二次 `spawn`，但可能继续消耗 GPU 时间。这一点没有实测。
 
+下面三条都还没有执行。前两条还要求 attestation 已经写好，并且 Modal 认证已经由账号持有人决定做过。现在这两件事都没有。
+
 ```bash
 python -m modal_musetalk submit \
   --portrait PORTRAIT.png \
@@ -84,6 +139,14 @@ python -m modal_musetalk recover \
   --call-id CALL_ID \
   --output ./out/result.mp4
 ```
+
+MP4 已经下载并且用下面的 ffprobe / 全解码核对之后，用 Modal SDK 1.6.4 的 CLI 停止这个已部署应用。该命令会永久停止应用并终止仍在跑的容器。文件还没落地时不要执行。这次没有执行：
+
+```bash
+modal app stop musetalk15-starter-once --yes
+```
+
+`--yes` 跳过 CLI 的确认提问。不带 `--yes` 时，`modal app stop` 会先询问。应用名与 `modal_musetalk/spec.py` 里的 `APP_NAME` 相同。`scaledown_window=2` 只缩短空闲容器的保留时间；停止应用是上面这条命令。
 
 `--wait-s` 默认 1800。函数超时 3600 秒，容器启动超时 600 秒。这两个数是配置，不是测量。
 
@@ -111,7 +174,7 @@ python -m scripts.inference \
 
 成片路径是 `<result_dir>/v15/result.mp4`，随后 remux 成 `result.mp4` 返回字节。本地写出 `./out/result.mp4` 和 `./out/result.usage.json`。
 
-下载完成之前不要执行 `modal app stop`。下载完成之后由账号持有人停止应用 `musetalk15-starter-once`，避免再手工触发第二次调用。本代码不会自动 stop。
+下载完成之前不要执行 `modal app stop`。下载并核对之后的精确命令写在上一节，这次没有执行。本代码不会自动 stop。
 
 ## GPU 释放与权重缓存成本
 
@@ -209,13 +272,13 @@ CPU 测试只用纯色图和正弦波跑过同样的 ffprobe / 全解码命令�
 
 ## 阻塞与下一步
 
-唯一关键阻塞：花费门闩关闭。没有经过人工核对的、已经保存并且确实生效的 $0 现金支出上限，GPU 可用资格也未核实。代码不会把 $1 的 Usage limit 或营销赠额当成放行条件。
+唯一关键阻塞：花费门闩关闭。还没有一份写明有效 $0 现金支出上限、并且 GPU 资格已经核对过的 attestation。代码不会把 $1 的 Usage limit 或营销赠额当成放行条件，也不会去登录或改账户限额。
 
-下一步由 Modal 账号持有人做，不由这次代码准备代做：
+账单页上的额度、付款要求和现金上限，由经授权的操作者核查。是否登录、是否改预算，由账号持有人决定。
 
-1. 在 Modal 账单页核对可用额度、付款方式要求，以及是否存在可回读的、不是文档默认公式的 $0 现金上限；同时核对 GPU 能否在零新增现金下调度。
-2. 只有三项都成立时，才在仓库外写 attestation，并执行上面的 `submit`。那一次会构建镜像并可能产生费用。
-3. 若等待超时，只用保存的 call id 执行 `recover`。
-4. 拿到 MP4 后跑 ffprobe 和全解码，再把 Modal 仪表上的实际秒数和金额填进 usage 文件。然后停止应用。
+1. 经授权的操作者核对可用额度、付款方式要求，以及是否存在可回读的、不是文档默认公式的 $0 现金上限，并核对 GPU 能否在零新增现金下调度。
+2. 只有这些条件成立，且账号持有人决定允许这一次费用时，才在仓库外写 attestation，并执行上面的 `submit`。那一次会构建镜像并可能产生费用。现在不要执行。
+3. 若等待超时，只用保存的 call id 执行 `recover`，不要再次 `submit`。
+4. 拿到 MP4 后跑 ffprobe 和全解码，再把 Modal 仪表上的实际秒数和金额填进 usage 文件。然后执行 `modal app stop musetalk15-starter-once --yes`。
 
 这一步之前，不要把任何输出当成 MuseTalk 成片或实际用量。
