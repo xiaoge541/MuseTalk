@@ -16,3 +16,6 @@ ffplay*
 debug
 exp_out
 .gradio
+.musetalk_modal_calls/
+*.usage.json
+out/

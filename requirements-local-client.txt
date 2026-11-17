@@ -1,0 +1,14 @@
+# Local submitter only. This is not the MuseTalk inference environment.
+#
+# CPU tests (python -m unittest tests.test_modal_adapter) import only the
+# Python standard library. They do not install or import this file.
+# PyYAML is not imported anywhere in modal_musetalk/.
+# huggingface_hub and gdown are imported only inside prepare_weights(),
+# which is the remote weight step, not the local CLI.
+#
+# modal==1.6.4 is the only third-party import on the future submit/recover
+# path (modal_musetalk/modal_backend.py). Do not pip-install
+# requirements.txt or requirements-modal-inference.txt to reproduce the
+# local tests or the local CLI.
+
+modal==1.6.4
